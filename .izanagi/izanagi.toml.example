@@ -1,0 +1,44 @@
+# imozuru-space サンドボックス設定の雛形 (Izanagi v0.2.6)
+#
+# このファイル自体は読み込まれない。`scripts/sandbox init` が
+# `izanagi config path` の場所 (~/.izanagi/settings/<hash>/izanagi.toml、共有範囲外) へコピーする。
+# 内容を変えたらコピー先も更新すること。シークレットは書かない。
+
+[sandbox]
+backend = "apple-container"
+# Apple Container ではホスト側トレーサーが使えない (Izanagi は NullTracer を選ぶ)。
+# syscall 監視は行われないことを明示するため none を指定する。
+tracer = "none"
+require_auth = true
+
+[sandbox.apple_container]
+runtime = "container"
+# `scripts/sandbox build` が作るイメージ。
+# Izanagi 0.2.6 は Apple container でタグ付きの名前を検出できないため、タグなし (= :latest) で指定する。
+# :latest は build が imozuru-space-sandbox:claude-<版> に付け直し、up 時に同一か検査する。
+image = "imozuru-space-sandbox"
+# network は未指定 = bridge。外部への通信は制限されない (Claude Code が API に接続するため必要)。
+
+[sandbox.environment]
+# イメージの PATH を引き継ぐ (/usr/local/bin/claude を解決するため)
+inherit = ["PATH"]
+
+[sandbox.environment.set]
+# 非機密の固定値のみ。トークン・API キーは絶対に書かない。
+DISABLE_AUTOUPDATER = "1"
+USE_BUILTIN_RIPGREP = "0"
+
+[share]
+paths = ["."]
+mount_point = "/workspace"
+# Claude Code にコードを編集させるため書き込み可。
+# サンドボックス内の変更はホストのファイルへ直接反映される (取り消し不可)。
+# .izanagi/ や scripts/ もホストで実行されるので、変更されていないか確認してから使う。
+read_only = false
+
+[monitor]
+syscalls = ["file", "network", "process", "env"]
+
+[detect]
+suspicious_paths = ["~/.ssh/*", "~/.aws/*", "~/.gnupg/*", "~/.config/gh/*"]
+allowed_hosts = []

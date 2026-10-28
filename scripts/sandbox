@@ -1,0 +1,243 @@
+#!/usr/bin/env bash
+# imozuru-space 開発サンドボックス (Izanagi + Apple Container / Docker) の操作コマンド。
+# 使い方: scripts/sandbox <command>   (scripts/sandbox help で一覧)
+# ランタイムは SANDBOX_RUNTIME=container|docker で選ぶ。未指定なら設定ファイルの値、なければ container。
+set -euo pipefail
+
+# --- 固定バージョン (.izanagi/Dockerfile と izanagi.toml.example も揃えて更新する) ---
+IZANAGI_VERSION="0.2.6"
+IZANAGI_COMMIT="14e09dbfc7c76165db4af6bdfe94ac7f8ac54068" # tag v0.2.6
+CLAUDE_CODE_VERSION="2.1.312"
+
+IZANAGI_REPO="https://github.com/ieee0824/izanagi.git"
+BASE_IMAGE="izanagi-vm:${IZANAGI_VERSION}"
+IMAGE_NAME="imozuru-space-sandbox"
+IMAGE="${IMAGE_NAME}:claude-${CLAUDE_CODE_VERSION}"
+# Izanagi 0.2.6 は Apple container でタグ付きイメージ名を検出できないため、
+# 設定ではタグなし名 (= :latest) を使い、:latest が $IMAGE と同じものかを up 時に確かめる
+RUN_IMAGE="${IMAGE_NAME}:latest"
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+UP_LOG="${TMPDIR:-/tmp}/imozuru-space-sandbox-up.log"
+READY_TIMEOUT=90
+
+die() { echo "error: $*" >&2; exit 1; }
+
+require() {
+    local cmd
+    for cmd in "$@"; do
+        command -v "$cmd" >/dev/null 2>&1 || die "$cmd が見つかりません (README の前提条件を参照)"
+    done
+}
+
+require_izanagi() {
+    require izanagi
+    local v
+    v="$(izanagi --version | awk '{print $2}')"
+    [ "$v" = "$IZANAGI_VERSION" ] ||
+        die "izanagi $IZANAGI_VERSION が必要です (現在: $v)。guest agent と版を揃えてください"
+}
+
+require_runtime() {
+    require "$RUNTIME"
+    case "$RUNTIME" in
+        container) container system status >/dev/null 2>&1 || die "'container system start' でランタイムを起動してください" ;;
+        docker) docker info >/dev/null 2>&1 || die "Docker デーモンに接続できません (Colima なら 'colima start')" ;;
+    esac
+}
+
+image_exists() { "$RUNTIME" image inspect "$1" >/dev/null 2>&1; }
+
+image_digest() {
+    case "$RUNTIME" in
+        container)
+            container image inspect "$1" 2>/dev/null |
+                sed -n 's/.*"digest" : "\(sha256:[0-9a-f]*\)".*/\1/p' | head -n1
+            ;;
+        docker) docker image inspect --format '{{.Id}}' "$1" 2>/dev/null ;;
+    esac
+}
+
+# Izanagi の設定・セッションはカレントディレクトリ単位なので常にプロジェクトルートで実行する
+cd "$ROOT"
+
+config_path() { izanagi config path; }
+
+configured_runtime() {
+    local path
+    path="$(config_path 2>/dev/null)" || return 0
+    [ -f "$path" ] || return 0
+    sed -n 's/^runtime *= *"\([a-z]*\)".*/\1/p' "$path" | head -n1
+}
+
+RUNTIME="${SANDBOX_RUNTIME:-$(configured_runtime)}"
+RUNTIME="${RUNTIME:-container}"
+case "$RUNTIME" in
+    container | docker) ;;
+    *) die "SANDBOX_RUNTIME は container か docker を指定してください: $RUNTIME" ;;
+esac
+
+require_config() {
+    [ -f "$(config_path)" ] || die "設定がありません。先に 'scripts/sandbox init' を実行してください"
+}
+
+izanagi_session_alive() {
+    # up の PID ファイル (<izanagi home>/instances/<hash>/izanagi.pid) のプロセスが生きていれば稼働中。
+    # <hash> は設定パス (<izanagi home>/settings/<hash>/izanagi.toml) と同じ cwd のハッシュ。
+    local settings_dir pid_file
+    settings_dir="$(dirname "$(config_path)")"
+    pid_file="$(dirname "$(dirname "$settings_dir")")/instances/$(basename "$settings_dir")/izanagi.pid"
+    [ -f "$pid_file" ] && kill -0 "$(head -n1 "$pid_file" | tr -d '[:space:]')" 2>/dev/null
+}
+
+cmd_build_base() {
+    require_runtime
+    require git
+    if image_exists "$BASE_IMAGE" && [ "${1:-}" != "--force" ]; then
+        echo "$BASE_IMAGE は既にあります (作り直す場合: scripts/sandbox build-base --force)"
+        return
+    fi
+    BUILD_TMP="$(mktemp -d)"
+    trap 'rm -rf "$BUILD_TMP"' EXIT
+    local src="$BUILD_TMP"
+    git clone --quiet --depth 1 --branch "v${IZANAGI_VERSION}" "$IZANAGI_REPO" "$src/izanagi"
+    local head
+    head="$(git -C "$src/izanagi" rev-parse HEAD)"
+    [ "$head" = "$IZANAGI_COMMIT" ] || die "v${IZANAGI_VERSION} のコミットが想定と異なります: $head"
+    # agent を Alpine (musl) 向けにコンテナ内でビルドし、成果物をホストへ書き出す。
+    # build.sh 単体だと Apple container では scratch イメージからの `container cp` が失敗するため、
+    # --output type=local で取り出したバイナリを build.sh に渡す。
+    "$RUNTIME" build -f "$src/izanagi/image/Dockerfile.build" \
+        --output "type=local,dest=$src/agent" "$src/izanagi"
+    # Apple container は linux_arm64/ のようなサブディレクトリに、Docker は dest 直下に出力する
+    local agent
+    agent="$(find "$src/agent" -type f -name izanagi-agent | head -n1)"
+    [ -n "$agent" ] && [ -x "$agent" ] || die "izanagi-agent のビルドに失敗しました"
+    bash "$src/izanagi/image/build.sh" --runtime "$RUNTIME" "$agent"
+    image_exists "$BASE_IMAGE" || die "$BASE_IMAGE が作成されませんでした"
+}
+
+cmd_build() {
+    require_runtime
+    image_exists "$BASE_IMAGE" || die "$BASE_IMAGE がありません。先に 'scripts/sandbox build-base' を実行してください"
+    "$RUNTIME" build \
+        --build-arg "IZANAGI_VERSION=${IZANAGI_VERSION}" \
+        --build-arg "CLAUDE_CODE_VERSION=${CLAUDE_CODE_VERSION}" \
+        -t "$IMAGE" -f "$ROOT/.izanagi/Dockerfile" "$ROOT/.izanagi"
+    "$RUNTIME" image tag "$IMAGE" "$RUN_IMAGE"
+}
+
+cmd_init() {
+    require_izanagi
+    local dest
+    dest="$(config_path)"
+    if [ -f "$dest" ] && [ "${1:-}" != "--force" ]; then
+        echo "設定は既にあります: $dest (雛形で上書きする場合: scripts/sandbox init --force)"
+        return
+    fi
+    install -d -m 0700 "$(dirname "$dest")"
+    # 雛形の runtime を選択中のランタイムに置き換えて保存する
+    local tmp
+    tmp="$(mktemp)"
+    sed "s/^runtime = \"container\"/runtime = \"$RUNTIME\"/" "$ROOT/.izanagi/izanagi.toml.example" >"$tmp"
+    grep -q "^runtime = \"$RUNTIME\"" "$tmp" || { rm -f "$tmp"; die "雛形の runtime 行を置き換えられません"; }
+    install -m 0600 "$tmp" "$dest"
+    rm -f "$tmp"
+    echo "設定を作成しました: $dest (runtime = $RUNTIME)"
+    izanagi config show >/dev/null
+}
+
+cmd_up() {
+    require_izanagi
+    require_runtime
+    require_config
+    [ "$(configured_runtime)" = "$RUNTIME" ] ||
+        die "設定の runtime ($(configured_runtime)) と $RUNTIME が違います。'SANDBOX_RUNTIME=$RUNTIME scripts/sandbox init --force' で作り直してください"
+    image_exists "$IMAGE" || die "$IMAGE がありません。先に 'scripts/sandbox build' を実行してください"
+    [ "$(image_digest "$RUN_IMAGE")" = "$(image_digest "$IMAGE")" ] ||
+        die "$RUN_IMAGE が $IMAGE を指していません。'scripts/sandbox build' を実行してください"
+    if izanagi_session_alive; then
+        echo "サンドボックスは既に起動しています"
+        return
+    fi
+    # imozuru の調査結果の置き場 (イメージ内の ~/research はここへのシンボリックリンク)
+    mkdir -p "$ROOT/research"
+    : >"$UP_LOG"
+    nohup izanagi up >>"$UP_LOG" 2>&1 &
+    local pid=$! waited=0
+    until grep -q "サンドボックスを起動しました" "$UP_LOG"; do
+        if ! kill -0 "$pid" 2>/dev/null; then
+            cat "$UP_LOG" >&2
+            die "izanagi up が終了しました"
+        fi
+        [ "$waited" -lt "$READY_TIMEOUT" ] || { cat "$UP_LOG" >&2; cmd_down; die "起動がタイムアウトしました"; }
+        sleep 1
+        waited=$((waited + 1))
+    done
+    echo "サンドボックスを起動しました (ログ: $UP_LOG)"
+}
+
+cmd_down() {
+    require_izanagi
+    # 未起動でも成功扱い (冪等)。コンテナは --rm なので停止と同時に中の認証情報も消える
+    izanagi down 2>&1 || true
+}
+
+cmd_shell() {
+    require_izanagi
+    izanagi_session_alive || die "サンドボックスが起動していません ('scripts/sandbox up')"
+    izanagi shell
+}
+
+cmd_exec() {
+    require_izanagi
+    [ "$#" -gt 0 ] || die "実行するコマンドを指定してください"
+    izanagi_session_alive || die "サンドボックスが起動していません ('scripts/sandbox up')"
+    izanagi exec -- "$@"
+}
+
+cmd_check() {
+    # 動作確認: Claude Code の起動と、共有ワークスペースへの読み書き
+    cmd_exec sh -c '
+        set -e
+        echo "user: $(id -un)  home: $HOME  pwd: $(pwd)"
+        claude --version
+        probe="/workspace/.sandbox-write-check.$$"
+        echo ok >"$probe" && rm -f "$probe" && echo "workspace: writable"
+    '
+}
+
+cmd_logs() {
+    require_izanagi
+    izanagi logs "$@"
+}
+
+usage() {
+    cat <<EOF
+Usage: [SANDBOX_RUNTIME=container|docker] scripts/sandbox <command>   (現在: $RUNTIME)
+
+  build-base [--force]  Izanagi v${IZANAGI_VERSION} から ${BASE_IMAGE} をビルド
+  build                 Claude Code ${CLAUDE_CODE_VERSION} 入りの ${IMAGE} をビルド
+  init [--force]        Izanagi 設定を雛形から作成 (共有範囲外に保存)
+  up                    サンドボックスをバックグラウンドで起動
+  shell                 サンドボックス内の対話シェル (ここで claude を実行)
+  exec <cmd...>         サンドボックス内でコマンドを実行
+  check                 Claude Code と /workspace 書き込みの動作確認
+  logs [args...]        izanagi logs
+  down                  停止 (コンテナと中の Claude Code 認証情報を破棄)
+EOF
+}
+
+case "${1:-help}" in
+    build-base) shift; cmd_build_base "$@" ;;
+    build) shift; cmd_build ;;
+    init) shift; cmd_init "$@" ;;
+    up) cmd_up ;;
+    down) cmd_down ;;
+    shell) cmd_shell ;;
+    exec) shift; cmd_exec "$@" ;;
+    check) cmd_check ;;
+    logs) shift; cmd_logs "$@" ;;
+    help | -h | --help) usage ;;
+    *) usage >&2; exit 2 ;;
+esac
