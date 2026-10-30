@@ -1,7 +1,7 @@
 # 開発サンドボックス (Izanagi + Claude Code + imozuru)
 
 [Izanagi](https://github.com/ieee0824/izanagi) v0.2.6 で隔離したコンテナの中で、
-Claude Code 2.1.312 と [imozuru](https://github.com/MaryCache/imozuru) v2.1.0 のスキルを使う環境です。
+Claude Code 2.1.312 と [imozuru](https://github.com/MaryCache/imozuru) v2.2.0 のスキルを使う環境です。
 コンテナのランタイムは Apple `container` と Docker のどちらでも使えます。
 
 ## 構成
@@ -55,7 +55,7 @@ bash scripts/sandbox down
 
 ## imozuru
 
-- README の手動インストール (`skills/imozuru/` を `~/.claude/skills/` へコピー) を、タグ `v2.1.0` (コミット固定) で
+- README の手動インストール (`skills/imozuru/` を `~/.claude/skills/` へコピー) を、タグ `v2.2.0` (コミット固定) で
   イメージに組み込んでいます。`/plugin install` で入れると、コンテナ内に入るので `down` のたびに消えます。
 - 調査結果の既定の置き場 `~/research` は `/workspace/research` へのシンボリックリンクにしてあり、
   ホストの `research/` に残ります。
