@@ -1,9 +1,9 @@
 # imozuru-space 開発用サンドボックス (Izanagi + Apple Container / Docker)
 #
-# ベースは Izanagi v0.2.6 のソースからビルドした izanagi-vm イメージ
+# ベースは Izanagi v0.2.7 のソースからビルドした izanagi-vm イメージ
 # (Alpine 3.23 をダイジェスト固定 + 同じ版の izanagi-agent)。
 # `scripts/sandbox build-base` で作成する。latest は使わずバージョンタグで固定する。
-ARG IZANAGI_VERSION=0.2.6
+ARG IZANAGI_VERSION=0.2.7
 FROM izanagi-vm:${IZANAGI_VERSION}
 
 ARG CLAUDE_CODE_VERSION=2.1.312
@@ -51,8 +51,3 @@ RUN git clone --quiet --depth 1 --branch "${IMOZURU_REF}" https://github.com/Mar
 
 # imozuru の調査結果の既定の置き場 (~/research) を共有ワークスペースへ向け、down 後も残す
 RUN ln -s /workspace/research /home/izanagi/research
-
-# izanagi-agent 0.2.6 は PID 1 として孤児プロセスを回収しないため、ゾンビがたまる
-# (Claude Code はコマンドを多数起動する)。tini を PID 1 にして回収させる。
-RUN apk add --no-cache tini
-ENTRYPOINT ["/sbin/tini", "--", "/entrypoint.sh"]
