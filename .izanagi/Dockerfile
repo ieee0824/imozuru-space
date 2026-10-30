@@ -28,8 +28,8 @@ RUN install -d -o izanagi -g izanagi -m 0700 /home/izanagi/.claude
 # - yt-dlp: YouTube の字幕
 # ax (HTML→markdown) は glibc 向けの Bun バイナリしか配布されていないため入れない
 # (imozuru は標準ライブラリでの本文抽出に切り替える)
-ARG IMOZURU_REF=v2.1.0
-ARG IMOZURU_COMMIT=659f46cdd25a4f969193642b9f368859a16ae0af
+ARG IMOZURU_REF=v2.2.0
+ARG IMOZURU_COMMIT=808407e501bc5a1e596655b0a6d62e1f3b20ba1b
 # Alpine に jpn_vert のパッケージが無いので、jpn (= tessdata 4.1.0) と同じ版をハッシュ固定で取る
 ARG TESSDATA_JPN_VERT_SHA256=36879c1aa07634302c9dcb2c1ed4f8fb347c705ad7522dd693ee2e9d68028a79
 
