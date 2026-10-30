@@ -5,18 +5,14 @@
 set -euo pipefail
 
 # --- 固定バージョン (.izanagi/Dockerfile と izanagi.toml.example も揃えて更新する) ---
-IZANAGI_VERSION="0.2.6"
-IZANAGI_COMMIT="14e09dbfc7c76165db4af6bdfe94ac7f8ac54068" # tag v0.2.6
+IZANAGI_VERSION="0.2.7"
+IZANAGI_COMMIT="d453baa121ddd08e2a84b8d36e88b8eb87d3b8ce" # tag v0.2.7
 CLAUDE_CODE_VERSION="2.1.312"
 
 IZANAGI_REPO="https://github.com/ieee0824/izanagi.git"
 BASE_IMAGE="izanagi-vm:${IZANAGI_VERSION}"
 IMAGE_NAME="imozuru-space-sandbox"
 IMAGE="${IMAGE_NAME}:claude-${CLAUDE_CODE_VERSION}"
-# Izanagi 0.2.6 は Apple container でタグ付きイメージ名を検出できないため、
-# 設定ではタグなし名 (= :latest) を使い、:latest が $IMAGE と同じものかを up 時に確かめる
-RUN_IMAGE="${IMAGE_NAME}:latest"
-
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 UP_LOG="${TMPDIR:-/tmp}/imozuru-space-sandbox-up.log"
 READY_TIMEOUT=90
@@ -47,16 +43,6 @@ require_runtime() {
 }
 
 image_exists() { "$RUNTIME" image inspect "$1" >/dev/null 2>&1; }
-
-image_digest() {
-    case "$RUNTIME" in
-        container)
-            container image inspect "$1" 2>/dev/null |
-                sed -n 's/.*"digest" : "\(sha256:[0-9a-f]*\)".*/\1/p' | head -n1
-            ;;
-        docker) docker image inspect --format '{{.Id}}' "$1" 2>/dev/null ;;
-    esac
-}
 
 # Izanagi の設定・セッションはカレントディレクトリ単位なので常にプロジェクトルートで実行する
 cd "$ROOT"
@@ -104,16 +90,7 @@ cmd_build_base() {
     local head
     head="$(git -C "$src/izanagi" rev-parse HEAD)"
     [ "$head" = "$IZANAGI_COMMIT" ] || die "v${IZANAGI_VERSION} のコミットが想定と異なります: $head"
-    # agent を Alpine (musl) 向けにコンテナ内でビルドし、成果物をホストへ書き出す。
-    # build.sh 単体だと Apple container では scratch イメージからの `container cp` が失敗するため、
-    # --output type=local で取り出したバイナリを build.sh に渡す。
-    "$RUNTIME" build -f "$src/izanagi/image/Dockerfile.build" \
-        --output "type=local,dest=$src/agent" "$src/izanagi"
-    # Apple container は linux_arm64/ のようなサブディレクトリに、Docker は dest 直下に出力する
-    local agent
-    agent="$(find "$src/agent" -type f -name izanagi-agent | head -n1)"
-    [ -n "$agent" ] && [ -x "$agent" ] || die "izanagi-agent のビルドに失敗しました"
-    bash "$src/izanagi/image/build.sh" --runtime "$RUNTIME" "$agent"
+    bash "$src/izanagi/image/build.sh" --runtime "$RUNTIME"
     image_exists "$BASE_IMAGE" || die "$BASE_IMAGE が作成されませんでした"
 }
 
@@ -124,7 +101,6 @@ cmd_build() {
         --build-arg "IZANAGI_VERSION=${IZANAGI_VERSION}" \
         --build-arg "CLAUDE_CODE_VERSION=${CLAUDE_CODE_VERSION}" \
         -t "$IMAGE" -f "$ROOT/.izanagi/Dockerfile" "$ROOT/.izanagi"
-    "$RUNTIME" image tag "$IMAGE" "$RUN_IMAGE"
 }
 
 cmd_init() {
@@ -154,8 +130,6 @@ cmd_up() {
     [ "$(configured_runtime)" = "$RUNTIME" ] ||
         die "設定の runtime ($(configured_runtime)) と $RUNTIME が違います。'SANDBOX_RUNTIME=$RUNTIME scripts/sandbox init --force' で作り直してください"
     image_exists "$IMAGE" || die "$IMAGE がありません。先に 'scripts/sandbox build' を実行してください"
-    [ "$(image_digest "$RUN_IMAGE")" = "$(image_digest "$IMAGE")" ] ||
-        die "$RUN_IMAGE が $IMAGE を指していません。'scripts/sandbox build' を実行してください"
     if izanagi_session_alive; then
         echo "サンドボックスは既に起動しています"
         return

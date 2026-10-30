@@ -9,7 +9,7 @@ imozuru で調べた結果は、このディレクトリの `research/` に残�
 ## 必要なもの
 
 - macOS (Apple Silicon)
-- [Izanagi](https://github.com/ieee0824/izanagi/releases) 0.2.6
+- [Izanagi](https://github.com/ieee0824/izanagi/releases) 0.2.7
 - コンテナランタイム: Docker (Colima など) または Apple `container`
 - git
 
@@ -52,7 +52,7 @@ scripts/sandbox down
 
 | コマンド | 内容 |
 |---|---|
-| `scripts/sandbox build-base` | Izanagi v0.2.6 のソースからベースイメージを作る |
+| `scripts/sandbox build-base` | Izanagi v0.2.7 のソースからベースイメージを作る |
 | `scripts/sandbox build` | Claude Code と imozuru を入れたイメージを作る |
 | `scripts/sandbox init` | Izanagi の設定を作る (`--force` で作り直す) |
 | `scripts/sandbox up` / `down` | 起動・停止 |

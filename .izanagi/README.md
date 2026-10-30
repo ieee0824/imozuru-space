@@ -1,6 +1,6 @@
 # 開発サンドボックス (Izanagi + Claude Code + imozuru)
 
-[Izanagi](https://github.com/ieee0824/izanagi) v0.2.6 で隔離したコンテナの中で、
+[Izanagi](https://github.com/ieee0824/izanagi) v0.2.7 で隔離したコンテナの中で、
 Claude Code 2.1.312 と [imozuru](https://github.com/MaryCache/imozuru) v2.2.0 のスキルを使う環境です。
 コンテナのランタイムは Apple `container` と Docker のどちらでも使えます。
 
@@ -8,7 +8,7 @@ Claude Code 2.1.312 と [imozuru](https://github.com/MaryCache/imozuru) v2.2.0 �
 
 | ファイル | 役割 |
 |---|---|
-| `.izanagi/Dockerfile` | `izanagi-vm:0.2.6` + Claude Code + imozuru スキルとその依存 (Python・poppler・tesseract・yt-dlp) |
+| `.izanagi/Dockerfile` | `izanagi-vm:0.2.7` + Claude Code + imozuru スキルとその依存 (Python・poppler・tesseract・yt-dlp) |
 | `.izanagi/izanagi.toml.example` | Izanagi 設定の雛形 (このファイル自体は読み込まれない) |
 | `scripts/sandbox` | ビルド・起動・停止などの操作コマンド |
 | `research/` | imozuru の調査結果 (サンドボックス内の `~/research`)。`up` 時に作成 |
@@ -16,7 +16,7 @@ Claude Code 2.1.312 と [imozuru](https://github.com/MaryCache/imozuru) v2.2.0 �
 ## 前提条件
 
 - macOS (Apple Silicon)
-- Izanagi **0.2.6** (`izanagi --version`)。ホストと guest agent の版をそろえるため、`scripts/sandbox` は他の版では動きません
+- Izanagi **0.2.7** (`izanagi --version`)。ホストと guest agent の版をそろえるため、`scripts/sandbox` は他の版では動きません
   - インストール手順: <https://github.com/ieee0824/izanagi#配布バイナリ>
 - コンテナランタイム (どちらか)
   - Apple `container` CLI (`container system start` で起動しておく)
@@ -33,8 +33,8 @@ Claude Code 2.1.312 と [imozuru](https://github.com/MaryCache/imozuru) v2.2.0 �
 export SANDBOX_RUNTIME=docker     # Apple container なら container (既定)
 
 # 1. イメージを作る (初回とバージョン更新時のみ)
-bash scripts/sandbox build-base   # Izanagi v0.2.6 のソース (コミット固定) から izanagi-vm:0.2.6
-bash scripts/sandbox build        # imozuru-space-sandbox:claude-2.1.312 (+ :latest)
+bash scripts/sandbox build-base   # Izanagi v0.2.7 のソース (コミット固定) から izanagi-vm:0.2.7
+bash scripts/sandbox build        # imozuru-space-sandbox:claude-2.1.312
 
 # 2. 設定を作る (初回とランタイムの切り替え時)。保存先は ~/.izanagi/settings/<hash>/izanagi.toml (共有範囲外)
 bash scripts/sandbox init         # 切り替え時は init --force
@@ -103,24 +103,24 @@ bash scripts/sandbox down
 Colima の VM にはホームディレクトリがマウントされているため、コンテナから VM に抜けられた場合の影響は
 Apple `container` より大きくなります。
 
-## Izanagi 0.2.6 の不具合への回避策
+## Izanagi 0.2.7 への移行
 
-起票済みの Issue ごとに、次の回避策を入れています。Izanagi 側で修正されたら外せます。
+v0.2.7 では [#115](https://github.com/ieee0824/izanagi/issues/115)・
+[#116](https://github.com/ieee0824/izanagi/issues/116)・
+[#117](https://github.com/ieee0824/izanagi/issues/117) が修正されています。
+ベースイメージは上流の `image/build.sh` でビルドし、`tini` も上流のイメージから引き継ぎます。
+設定はタグ付きイメージを直接参照します。
 
-- [#115](https://github.com/ieee0824/izanagi/issues/115) `image/build.sh` が Apple `container` で agent の取り出しに失敗する
-  → `build-base` は `<runtime> build --output type=local` で agent をビルドし、そのバイナリを `build.sh` に渡しています。
-- [#116](https://github.com/ieee0824/izanagi/issues/116) タグ付きのイメージ名 (`name:tag`) を検出できない
-  → 設定はタグなしの `imozuru-space-sandbox` (= `:latest`) を指定しています。`build` は
-  `imozuru-space-sandbox:claude-<版>` を作ってから `:latest` を付け直し、`up` は両者が同じイメージか確認してから起動します。
-- [#117](https://github.com/ieee0824/izanagi/issues/117) PID 1 の agent が孤児プロセスを回収せず、ゾンビがたまる
-  → イメージの ENTRYPOINT で `tini` を PID 1 にしています。
+既存環境では、稼働中のサンドボックスを旧版で停止してからホストの Izanagi を 0.2.7 に更新し、
+`build-base` → `build` → `init --force` → `up` を実行してください。
+`init --force` は既存の設定を雛形で上書きするため、独自の設定は事前に控えてください。
 
 ## バージョンの更新
 
 | 対象 | 変更する場所 |
 |---|---|
 | Izanagi | `scripts/sandbox` の `IZANAGI_VERSION`・`IZANAGI_COMMIT`、`Dockerfile` の `IZANAGI_VERSION`、ホストの `izanagi` |
-| Claude Code | `scripts/sandbox` の `CLAUDE_CODE_VERSION`、`Dockerfile` の `CLAUDE_CODE_VERSION` |
+| Claude Code | `scripts/sandbox` の `CLAUDE_CODE_VERSION`、`Dockerfile` の `CLAUDE_CODE_VERSION`、`izanagi.toml.example` の `image` |
 | imozuru | `Dockerfile` の `IMOZURU_REF`・`IMOZURU_COMMIT` |
 
 変更後に `build-base` (Izanagi のとき) → `build` → `init --force` を実行してください。

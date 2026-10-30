@@ -1,4 +1,4 @@
-# imozuru-space サンドボックス設定の雛形 (Izanagi v0.2.6)
+# imozuru-space サンドボックス設定の雛形 (Izanagi v0.2.7)
 #
 # このファイル自体は読み込まれない。`scripts/sandbox init` が
 # `izanagi config path` の場所 (~/.izanagi/settings/<hash>/izanagi.toml、共有範囲外) へコピーする。
@@ -14,9 +14,7 @@ require_auth = true
 [sandbox.apple_container]
 runtime = "container"
 # `scripts/sandbox build` が作るイメージ。
-# Izanagi 0.2.6 は Apple container でタグ付きの名前を検出できないため、タグなし (= :latest) で指定する。
-# :latest は build が imozuru-space-sandbox:claude-<版> に付け直し、up 時に同一か検査する。
-image = "imozuru-space-sandbox"
+image = "imozuru-space-sandbox:claude-2.1.312"
 # network は未指定 = bridge。外部への通信は制限されない (Claude Code が API に接続するため必要)。
 
 [sandbox.environment]
