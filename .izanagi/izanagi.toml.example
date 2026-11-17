@@ -18,8 +18,10 @@ image = "imozuru-space-sandbox:claude-2.1.312"
 # network は未指定 = bridge。外部への通信は制限されない (Claude Code が API に接続するため必要)。
 
 [sandbox.environment]
-# イメージの PATH を引き継ぐ (/usr/local/bin/claude を解決するため)
-inherit = ["PATH"]
+# イメージの PATH と LANG を引き継ぐ
+# - PATH: /usr/local/bin の claude・cc-sakura を解決するため
+# - LANG: イメージは Debian (glibc) なので、C.UTF-8 にしないと日本語が化ける
+inherit = ["PATH", "LANG"]
 
 [sandbox.environment.set]
 # 非機密の固定値のみ。トークン・API キーは絶対に書かない。

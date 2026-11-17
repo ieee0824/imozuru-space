@@ -171,11 +171,12 @@ cmd_exec() {
 }
 
 cmd_check() {
-    # 動作確認: Claude Code の起動と、共有ワークスペースへの読み書き
+    # 動作確認: Claude Code・cc-sakura の起動と、共有ワークスペースへの読み書き
     cmd_exec sh -c '
         set -e
-        echo "user: $(id -un)  home: $HOME  pwd: $(pwd)"
+        echo "user: $(id -un)  home: $HOME  pwd: $(pwd)  LANG: ${LANG:-}"
         claude --version
+        cc-sakura --version
         probe="/workspace/.sandbox-write-check.$$"
         echo ok >"$probe" && rm -f "$probe" && echo "workspace: writable"
     '
@@ -196,7 +197,7 @@ Usage: [SANDBOX_RUNTIME=container|docker] scripts/sandbox <command>   (現在: $
   up                    サンドボックスをバックグラウンドで起動
   shell                 サンドボックス内の対話シェル (ここで claude を実行)
   exec <cmd...>         サンドボックス内でコマンドを実行
-  check                 Claude Code と /workspace 書き込みの動作確認
+  check                 Claude Code・cc-sakura と /workspace 書き込みの動作確認
   logs [args...]        izanagi logs
   down                  停止 (コンテナと中の Claude Code 認証情報を破棄)
 EOF

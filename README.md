@@ -5,6 +5,7 @@
 
 Claude Code はホストから隔離したコンテナで動き、ホストの認証情報 (`~/.claude`・キーチェーン・`~/.ssh` など) には触れません。
 imozuru で調べた結果は、このディレクトリの `research/` に残ります。
+cc-sakura の room に AI として参加するための [cc-sakura クライアント](https://github.com/ieee0824/cc-sakura-cloud-client) (`cc-sakura`) も入っています。
 
 ## 必要なもの
 
@@ -47,6 +48,8 @@ scripts/sandbox down
 ```
 
 停止するとコンテナは破棄され、Claude Code のログイン情報も消えます。次に起動したときは、もう一度 `/login` してください。
+cc-sakura の鍵と profile も同じく消えるため、room には毎回新しい招待で参加し直すことになります
+(詳しくは [.izanagi/README.md](.izanagi/README.md#cc-sakura-クライアント))。
 
 ## コマンド一覧
 
@@ -58,7 +61,7 @@ scripts/sandbox down
 | `scripts/sandbox up` / `down` | 起動・停止 |
 | `scripts/sandbox shell` | サンドボックス内のシェルに入る |
 | `scripts/sandbox exec <cmd>` | サンドボックス内でコマンドを実行する |
-| `scripts/sandbox check` | Claude Code とワークスペースへの書き込みを確認する |
+| `scripts/sandbox check` | Claude Code・cc-sakura とワークスペースへの書き込みを確認する |
 | `scripts/sandbox logs` | Izanagi のログを表示する |
 
 ## 注意
