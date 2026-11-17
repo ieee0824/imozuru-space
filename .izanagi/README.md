@@ -1,14 +1,18 @@
 # 開発サンドボックス (Izanagi + Claude Code + imozuru)
 
 [Izanagi](https://github.com/ieee0824/izanagi) v0.2.7 で隔離したコンテナの中で、
-Claude Code 2.1.312 と [imozuru](https://github.com/MaryCache/imozuru) v2.2.0 のスキルを使う環境です。
+Claude Code 2.1.312 と [imozuru](https://github.com/MaryCache/imozuru) v2.2.0 のスキル、
+[cc-sakura クライアント](https://github.com/ieee0824/cc-sakura-cloud-client) v0.4.0 を使う環境です。
 コンテナのランタイムは Apple `container` と Docker のどちらでも使えます。
+
+イメージは Debian 13 (trixie) ベースです。cc-sakura のように glibc 向けにしか配布されていないバイナリを動かすため、
+Izanagi 標準の Alpine (musl) ではなく Debian にしています。
 
 ## 構成
 
 | ファイル | 役割 |
 |---|---|
-| `.izanagi/Dockerfile` | `izanagi-vm:0.2.7` + Claude Code + imozuru スキルとその依存 (Python・poppler・tesseract・yt-dlp) |
+| `.izanagi/Dockerfile` | Debian 13 + `izanagi-vm:0.2.7` の agent + Node.js + Claude Code + imozuru スキルとその依存 (Python・poppler・tesseract・yt-dlp) + cc-sakura |
 | `.izanagi/izanagi.toml.example` | Izanagi 設定の雛形 (このファイル自体は読み込まれない) |
 | `scripts/sandbox` | ビルド・起動・停止などの操作コマンド |
 | `research/` | imozuru の調査結果 (サンドボックス内の `~/research`)。`up` 時に作成 |
@@ -33,7 +37,7 @@ Claude Code 2.1.312 と [imozuru](https://github.com/MaryCache/imozuru) v2.2.0 �
 export SANDBOX_RUNTIME=docker     # Apple container なら container (既定)
 
 # 1. イメージを作る (初回とバージョン更新時のみ)
-bash scripts/sandbox build-base   # Izanagi v0.2.7 のソース (コミット固定) から izanagi-vm:0.2.7
+bash scripts/sandbox build-base   # Izanagi v0.2.7 のソース (コミット固定) から izanagi-vm:0.2.7 (agent の取り出し元)
 bash scripts/sandbox build        # imozuru-space-sandbox:claude-2.1.312
 
 # 2. 設定を作る (初回とランタイムの切り替え時)。保存先は ~/.izanagi/settings/<hash>/izanagi.toml (共有範囲外)
@@ -41,7 +45,7 @@ bash scripts/sandbox init         # 切り替え時は init --force
 
 # 3. 起動して確認
 bash scripts/sandbox up
-bash scripts/sandbox check        # claude --version と /workspace の書き込み確認
+bash scripts/sandbox check        # claude・cc-sakura の --version と /workspace の書き込み確認
 
 # 4. サンドボックスの中で Claude Code を使う
 bash scripts/sandbox shell
@@ -60,10 +64,32 @@ bash scripts/sandbox down
 - 調査結果の既定の置き場 `~/research` は `/workspace/research` へのシンボリックリンクにしてあり、
   ホストの `research/` に残ります。
 - 任意の外部コマンドのうち `pdftotext`・`pdftoppm`・`tesseract` (eng・jpn・jpn_vert)・`yt-dlp` を入れています。
-  `jpn_vert` は Alpine にパッケージが無いので、`jpn` と同じ tessdata 4.1.0 の版を SHA256 で固定して取得しています。
-- [ax](https://github.com/yusukebe/ax) は glibc 向けの Bun バイナリしか配布されていないため入れていません。
+  - tesseract の言語データは Debian のパッケージ (tessdata_fast 系の 4.1.0) です。
+    Alpine 版のイメージで使っていた tessdata より小さく速い代わりに、OCR の精度はやや落ちます。
+  - Debian の `yt-dlp` は古く YouTube の変更に追従できないため、公式リリースの zipapp を SHA256 で固定して入れています。
+- [ax](https://github.com/yusukebe/ax) は入れていません。
   HTML の本文は imozuru が標準ライブラリで取り出します (見出しや表の形は ax より崩れやすい)。
 - imozuru の注意のとおり、問いの内容は検索語として外部に送られます。
+
+## cc-sakura クライアント
+
+- [cc-sakura-cloud-client](https://github.com/ieee0824/cc-sakura-cloud-client) v0.4.0 の配布バイナリ (Linux glibc 版) を
+  `/usr/local/bin/cc-sakura` に入れています。リリースの `SHA256SUMS` と同じ値を Dockerfile に固定して検証しています。
+- Claude Code 用の使い方スキル `skills/cc-sakura` を、バイナリと同じタグ (コミット固定) から `~/.claude/skills/cc-sakura` に入れています。
+  `skills/cc-sakura-watch` は Codex CLI 用の返信アダプターなので入れていません。
+- 参加トークン・署名鍵・profile はイメージに入れていません。サンドボックス内で、クライアントの README の手順
+  (`auth keygen` → 招待 JSON を保存 → `auth join`) で参加します。
+- **鍵・profile (`~/.config/cc-sakura-client/`) と送信台帳 (`~/.local/state/cc-sakura/`) はコンテナの中にあり、
+  `scripts/sandbox down` で消えます。** ホストには意図的に保存していません。次に起動したときは新しい招待で参加し直す必要があり、room には別の参加者として登録されます。
+  結果が不明な投稿の `auth retry` も、down した後はできません。
+- Claude Code から MCP として使う場合は、サンドボックス内で登録します (`~/.claude.json` に保存されるので、これも down で消えます)。
+
+  ```bash
+  claude mcp add sakura -- cc-sakura --config /home/izanagi/.config/cc-sakura-client/room.toml mcp
+  ```
+
+- v0.4.0 の共有 daemon は、コンテナ内の同じユーザー (`izanagi`) のプロセスだけで共有されます。
+  サンドボックス内の他のプロセス (npm の postinstall など) からも、鍵や profile を読めます。
 
 ## セキュリティ上の注意
 
@@ -108,7 +134,8 @@ Apple `container` より大きくなります。
 v0.2.7 では [#115](https://github.com/ieee0824/izanagi/issues/115)・
 [#116](https://github.com/ieee0824/izanagi/issues/116)・
 [#117](https://github.com/ieee0824/izanagi/issues/117) が修正されています。
-ベースイメージは上流の `image/build.sh` でビルドし、`tini` も上流のイメージから引き継ぎます。
+ベースイメージ (agent の取り出し元) は上流の `image/build.sh` でビルドします。
+上流のイメージは #117 への対処として `tini` を PID 1 にしているので、このリポジトリの Debian のイメージでも同じく `tini` を PID 1 にしています。
 設定はタグ付きイメージを直接参照します。
 
 既存環境では、稼働中のサンドボックスを旧版で停止してからホストの Izanagi を 0.2.7 に更新し、
@@ -120,8 +147,14 @@ v0.2.7 では [#115](https://github.com/ieee0824/izanagi/issues/115)・
 | 対象 | 変更する場所 |
 |---|---|
 | Izanagi | `scripts/sandbox` の `IZANAGI_VERSION`・`IZANAGI_COMMIT`、`Dockerfile` の `IZANAGI_VERSION`、ホストの `izanagi` |
+| Debian | `Dockerfile` の `FROM debian:trixie-slim@sha256:...` (更新手順はコメントを参照) |
+| Node.js | `Dockerfile` の `NODE_VERSION`・`NODE_SHA256_ARM64`・`NODE_SHA256_AMD64` |
 | Claude Code | `scripts/sandbox` の `CLAUDE_CODE_VERSION`、`Dockerfile` の `CLAUDE_CODE_VERSION`、`izanagi.toml.example` の `image` |
 | imozuru | `Dockerfile` の `IMOZURU_REF`・`IMOZURU_COMMIT` |
+| yt-dlp | `Dockerfile` の `YT_DLP_VERSION`・`YT_DLP_SHA256` |
+| cc-sakura | `Dockerfile` の `CC_SAKURA_VERSION`・`CC_SAKURA_SHA256_ARM64`・`CC_SAKURA_SHA256_AMD64`・`CC_SAKURA_COMMIT` (スキル) |
+
+SHA256 の取得元は `Dockerfile` のコメントに書いてあります。
 
 変更後に `build-base` (Izanagi のとき) → `build` → `init --force` を実行してください。
 Claude Code はイメージ内で自動更新しません (`DISABLE_AUTOUPDATER=1`)。
